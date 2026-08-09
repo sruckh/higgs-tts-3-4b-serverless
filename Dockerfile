@@ -21,6 +21,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # own post-model-load fitness checks (GPU memory probe, CUDA init) can
 # false-positive OOM on otherwise-healthy heavy-VRAM workers and mark them
 # unhealthy; skip them.
+#
+# RUNPOD_INIT_TIMEOUT: RunPod marks a worker unhealthy — and kills it, often
+# before any of our own logs ship — once cold start passes 7 minutes
+# (https://docs.runpod.io/serverless/development/optimization, verified
+# 2026-08-09). A cache-miss cold start here (network model download, then
+# sgl-omni engine warm-up) can plausibly exceed that default, which produces
+# exactly the "worker exited with exit code 1, no logs" symptom. 1200s gives
+# headroom above ENGINE_READY_TIMEOUT_SECONDS's own 600s engine-health poll
+# plus download time.
 ENV PATH="/root/.local/bin:${PATH}" \
     CUDA_VERSION=12.4 \
     PYTHONUNBUFFERED=1 \
@@ -31,7 +40,8 @@ ENV PATH="/root/.local/bin:${PATH}" \
     HF_HUB_ENABLE_HF_TRANSFER=1 \
     TRANSFORMERS_CACHE=/runpod-volume/huggingface-cache \
     RUNPOD_SKIP_GPU_CHECK=true \
-    RUNPOD_SKIP_AUTO_SYSTEM_CHECKS=true
+    RUNPOD_SKIP_AUTO_SYSTEM_CHECKS=true \
+    RUNPOD_INIT_TIMEOUT=1200
 
 RUN command -v uv >/dev/null 2>&1 || (curl -LsSf https://astral.sh/uv/install.sh | sh)
 

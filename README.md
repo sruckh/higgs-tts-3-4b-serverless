@@ -151,6 +151,7 @@ Lower real-time factor is better (< 1.0 means faster than real-time playback).
 | `ENGINE_READY_TIMEOUT_SECONDS` | `600` | How long `handler.py`'s bootstrap waits for `sgl-omni serve` to report healthy before failing the worker |
 | `RUNPOD_SKIP_GPU_CHECK` | `true` | Set on the image; skips a RunPod SDK fitness check that false-positive OOMs on this worker's VRAM footprint |
 | `RUNPOD_SKIP_AUTO_SYSTEM_CHECKS` | `true` | Set on the image; same reason as above |
+| `RUNPOD_INIT_TIMEOUT` | `1200` | Set on the image; RunPod kills a worker as unhealthy once cold start exceeds a 7-minute default, which a cache-miss cold start (network download + engine warm-up) here can exceed — this is the most common cause of "worker exited with exit code 1" with no logs |
 
 Hardware: NVIDIA GPU with **≥32GB VRAM** (A100 80GB, H100 80GB, or L40S 48GB), CUDA 12.4, Python 3.12.
 
