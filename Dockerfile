@@ -32,8 +32,11 @@ RUN command -v uv >/dev/null 2>&1 || (curl -LsSf https://astral.sh/uv/install.sh
 WORKDIR /workspace
 
 # --- Python dependencies (cached layer, changes less often than source) ---
+# --break-system-packages: the base image's /usr Python is PEP 668
+# "externally managed" (Debian); this container only ever runs this app, so
+# installing into system Python is intentional, not accidental.
 COPY requirements.txt /workspace/requirements.txt
-RUN uv pip install --system --no-cache -r requirements.txt
+RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
 
 # --- Application source ------------------------------------------------
 # .dockerignore strips dot-directories, AGENTS.md, CLAUDE.md, and other
