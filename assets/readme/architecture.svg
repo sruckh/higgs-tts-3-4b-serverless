@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640" viewBox="0 0 1200 640" role="img" aria-labelledby="arch-title arch-desc">
+  <title id="arch-title">higgs-tts3-runpod container lifecycle</title>
+  <desc id="arch-desc">entrypoint.sh runs a one-time cold start that resolves the cache, checks the environment, downloads model weights, and starts the SGLang-Omni engine. Once healthy, handler.py serves every RunPod job by validating input, calling the local engine, and returning unary or streamed audio.</desc>
+
+  <defs>
+    <pattern id="frameRuler2" width="120" height="20" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="20" x2="0" y2="12" stroke="#4B545C" stroke-width="1.5"/>
+      <line x1="15" y1="20" x2="15" y2="12" stroke="#4B545C" stroke-width="1.5"/>
+      <line x1="30" y1="20" x2="30" y2="12" stroke="#4B545C" stroke-width="1.5"/>
+      <line x1="45" y1="20" x2="45" y2="12" stroke="#4B545C" stroke-width="1.5"/>
+      <line x1="60" y1="20" x2="60" y2="12" stroke="#4B545C" stroke-width="1.5"/>
+      <line x1="75" y1="20" x2="75" y2="12" stroke="#4B545C" stroke-width="1.5"/>
+      <line x1="90" y1="20" x2="90" y2="12" stroke="#4B545C" stroke-width="1.5"/>
+      <line x1="105" y1="20" x2="105" y2="4" stroke="#38E1A6" stroke-width="2"/>
+    </pattern>
+    <marker id="arrow2" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L8 4 L0 8 z" fill="#3A434B"/>
+    </marker>
+    <marker id="arrowAccent" viewBox="0 0 8 8" refX="4" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M0 0 L8 4 L0 8 z" fill="#38E1A6"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="640" rx="28" fill="#0A0D10"/>
+
+  <text x="64" y="56" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="28" font-weight="700" fill="#F3F5F2">Container lifecycle</text>
+  <text x="64" y="82" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" fill="#8A939C">entrypoint.sh orchestrates cold start once; handler.py serves every job after.</text>
+
+  <rect x="64" y="102" width="1072" height="20" fill="url(#frameRuler2)"/>
+
+  <text x="64" y="160" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" letter-spacing="1.5" fill="#38E1A6">COLD START — ONCE PER WORKER</text>
+  <text x="632" y="160" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" letter-spacing="1.5" fill="#38E1A6">STEADY STATE — EVERY JOB</text>
+
+  <line x1="600" y1="150" x2="600" y2="600" stroke="#1E252B" stroke-width="1.5"/>
+
+  <!-- ============ Column 1: cold start ============ -->
+  <g>
+    <!-- step 1 -->
+    <rect x="64" y="178" width="504" height="80" rx="14" fill="#12161B" stroke="#1E252B"/>
+    <circle cx="100" cy="218" r="15" fill="#171C22" stroke="#38E1A6"/>
+    <text x="100" y="223" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#38E1A6">1</text>
+    <text x="132" y="210" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="600" fill="#F3F5F2">Resolve cache paths</text>
+    <text x="132" y="234" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#6B7680">scripts/cache_config.sh &#8594; HF_HOME</text>
+
+    <line x1="100" y1="258" x2="100" y2="280" stroke="#3A434B" stroke-width="2" marker-end="url(#arrow2)"/>
+
+    <!-- step 2 -->
+    <rect x="64" y="282" width="504" height="80" rx="14" fill="#12161B" stroke="#1E252B"/>
+    <circle cx="100" cy="322" r="15" fill="#171C22" stroke="#38E1A6"/>
+    <text x="100" y="327" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#38E1A6">2</text>
+    <text x="132" y="314" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="600" fill="#F3F5F2">Verify environment</text>
+    <text x="132" y="338" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#6B7680">scripts/base_env_check.sh &#8594; CUDA · GPU · audio libs</text>
+
+    <line x1="100" y1="362" x2="100" y2="384" stroke="#3A434B" stroke-width="2" marker-end="url(#arrow2)"/>
+
+    <!-- step 3 -->
+    <rect x="64" y="386" width="504" height="80" rx="14" fill="#12161B" stroke="#1E252B"/>
+    <circle cx="100" cy="426" r="15" fill="#171C22" stroke="#38E1A6"/>
+    <text x="100" y="431" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#38E1A6">3</text>
+    <text x="132" y="418" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="600" fill="#F3F5F2">Fetch model weights</text>
+    <text x="132" y="442" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#6B7680">scripts/download_model.py &#8594; snapshot + integrity check</text>
+
+    <line x1="100" y1="466" x2="100" y2="488" stroke="#3A434B" stroke-width="2" marker-end="url(#arrow2)"/>
+
+    <!-- step 4 -->
+    <rect x="64" y="490" width="504" height="80" rx="14" fill="#12161B" stroke="#1E252B"/>
+    <circle cx="100" cy="530" r="15" fill="#171C22" stroke="#38E1A6"/>
+    <text x="100" y="535" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#38E1A6">4</text>
+    <text x="132" y="522" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="600" fill="#F3F5F2">Start engine, wait healthy</text>
+    <text x="132" y="546" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#6B7680">scripts/start_engine.sh --background &#8594; poll /health</text>
+  </g>
+
+  <!-- connector: cold start done -> worker ready to receive jobs -->
+  <path d="M568 530 C 600 530 600 218 632 218" fill="none" stroke="#38E1A6" stroke-width="2" marker-end="url(#arrowAccent)"/>
+  <text x="600" y="378" text-anchor="middle" transform="rotate(-90 600 378)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#38E1A6">worker ready</text>
+
+  <!-- ============ Column 2: steady state ============ -->
+  <g>
+    <!-- step 1 -->
+    <rect x="632" y="178" width="504" height="80" rx="14" fill="#12161B" stroke="#1E252B"/>
+    <circle cx="668" cy="218" r="15" fill="#171C22" stroke="#38E1A6"/>
+    <text x="668" y="223" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#38E1A6">1</text>
+    <text x="700" y="210" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="600" fill="#F3F5F2">Receive job</text>
+    <text x="700" y="234" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#6B7680">RunPod Job Queue &#8594; job[&quot;input&quot;]</text>
+
+    <line x1="668" y1="258" x2="668" y2="280" stroke="#3A434B" stroke-width="2" marker-end="url(#arrow2)"/>
+
+    <!-- step 2 -->
+    <rect x="632" y="282" width="504" height="80" rx="14" fill="#12161B" stroke="#1E252B"/>
+    <circle cx="668" cy="322" r="15" fill="#171C22" stroke="#38E1A6"/>
+    <text x="668" y="327" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#38E1A6">2</text>
+    <text x="700" y="314" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="600" fill="#F3F5F2">Validate payload</text>
+    <text x="700" y="338" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#6B7680">schema_validator.validate_job_input()</text>
+
+    <line x1="668" y1="362" x2="668" y2="384" stroke="#3A434B" stroke-width="2" marker-end="url(#arrow2)"/>
+
+    <!-- step 3 -->
+    <rect x="632" y="386" width="504" height="80" rx="14" fill="#12161B" stroke="#1E252B"/>
+    <circle cx="668" cy="426" r="15" fill="#171C22" stroke="#38E1A6"/>
+    <text x="668" y="431" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#38E1A6">3</text>
+    <text x="700" y="418" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="600" fill="#F3F5F2">Call local engine</text>
+    <text x="700" y="442" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#6B7680">POST http://127.0.0.1:8000/v1/audio/speech</text>
+
+    <line x1="668" y1="466" x2="668" y2="488" stroke="#3A434B" stroke-width="2" marker-end="url(#arrow2)"/>
+
+    <!-- step 4 -->
+    <rect x="632" y="490" width="504" height="80" rx="14" fill="#12161B" stroke="#1E252B"/>
+    <circle cx="668" cy="530" r="15" fill="#171C22" stroke="#38E1A6"/>
+    <text x="668" y="535" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#38E1A6">4</text>
+    <text x="700" y="522" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="20" font-weight="600" fill="#F3F5F2">Return audio</text>
+    <text x="700" y="546" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#6B7680">audio_base64 (unary) or audio_chunk stream (SSE)</text>
+  </g>
+
+  <text x="632" y="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="15" fill="#6B7680">&#8635; repeats every job, until scale-to-zero</text>
+</svg>

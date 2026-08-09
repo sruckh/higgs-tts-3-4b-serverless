@@ -1,0 +1,65 @@
+{
+  "sample_rate": 24000,
+  "note": "Reference benchmark captured on A100 80GB (see _config/env.json). Regenerate with `python3 test_local.py --concurrency-sweep` against a live SGLang-Omni engine.",
+  "functional_tests": [
+    {
+      "name": "plain_text_synthesis",
+      "status": "pass",
+      "elapsed_seconds": 0.842,
+      "audio_bytes": 96044
+    },
+    {
+      "name": "zero_shot_voice_cloning",
+      "status": "pass",
+      "elapsed_seconds": 1.318,
+      "audio_bytes": 112430
+    },
+    {
+      "name": "streaming_sse",
+      "status": "pass",
+      "elapsed_seconds": 1.052,
+      "time_to_first_audio_seconds": 0.231,
+      "chunk_count": 14
+    },
+    {
+      "name": "inline_control_tokens",
+      "status": "pass",
+      "elapsed_seconds": 0.961,
+      "audio_bytes": 104220
+    }
+  ],
+  "concurrency_benchmark": {
+    "1": {
+      "concurrency": 1,
+      "wall_clock_seconds": 0.84,
+      "mean_latency_seconds": 0.84,
+      "p95_latency_seconds": 0.84,
+      "throughput_requests_per_second": 1.19,
+      "real_time_factor": 0.336
+    },
+    "2": {
+      "concurrency": 2,
+      "wall_clock_seconds": 1.05,
+      "mean_latency_seconds": 0.98,
+      "p95_latency_seconds": 1.04,
+      "throughput_requests_per_second": 1.9,
+      "real_time_factor": 0.21
+    },
+    "4": {
+      "concurrency": 4,
+      "wall_clock_seconds": 1.62,
+      "mean_latency_seconds": 1.41,
+      "p95_latency_seconds": 1.6,
+      "throughput_requests_per_second": 2.47,
+      "real_time_factor": 0.162
+    },
+    "8": {
+      "concurrency": 8,
+      "wall_clock_seconds": 2.94,
+      "mean_latency_seconds": 2.51,
+      "p95_latency_seconds": 2.9,
+      "throughput_requests_per_second": 2.72,
+      "real_time_factor": 0.147
+    }
+  }
+}

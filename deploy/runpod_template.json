@@ -1,0 +1,33 @@
+{
+  "name": "higgs-tts3-runpod",
+  "imageName": "registry/higgs-tts3-runpod:latest",
+  "dockerArgs": "",
+  "containerDiskInGb": 20,
+  "volumeInGb": 100,
+  "volumeMountPath": "/runpod-volume",
+  "ports": "8000/http",
+  "env": [
+    { "key": "HF_HOME", "value": "/runpod-volume/huggingface-cache" },
+    { "key": "HF_TOKEN", "value": "" },
+    { "key": "MODEL_REPO_ID", "value": "bosonai/higgs-tts-3-4b" },
+    { "key": "MODEL_REVISION", "value": "main" },
+    { "key": "PYTHONUNBUFFERED", "value": "1" },
+    { "key": "SKIP_MODEL_DOWNLOAD", "value": "0" }
+  ],
+  "gpuIds": "A100_SXM4_80GB,H100_SXM5_80GB,L40S",
+  "gpuCount": 1,
+  "minVram": 32,
+  "workersMin": 0,
+  "workersMax": 3,
+  "idleTimeout": 5,
+  "executionTimeoutMs": 600000,
+  "scalerType": "QUEUE_DELAY",
+  "scalerValue": 4,
+  "build": {
+    "note": "Run from the project root. .dockerignore strips .icm/, .goals/, .claude/, .outline/, .serena/, AGENTS.md, and CLAUDE.md from the build context.",
+    "commands": [
+      "docker build -t registry/higgs-tts3-runpod:latest .",
+      "docker push registry/higgs-tts3-runpod:latest"
+    ]
+  }
+}

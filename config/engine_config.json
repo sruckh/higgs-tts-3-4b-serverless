@@ -1,0 +1,27 @@
+{
+  "engine": "sglang-omni",
+  "command": "sgl-omni",
+  "subcommand": "serve",
+  "model_path": "bosonai/higgs-tts-3-4b",
+  "host": "127.0.0.1",
+  "port": 8000,
+  "tp_size": 1,
+  "health_endpoint": "http://127.0.0.1:8000/health",
+  "speech_endpoint": "http://127.0.0.1:8000/v1/audio/speech",
+  "readiness": {
+    "poll_interval_seconds": 2,
+    "timeout_seconds": 300,
+    "expected_status_code": 200
+  },
+  "runtime": {
+    "sample_rate": 24000,
+    "fps": 25,
+    "codebooks": 8,
+    "cuda_graph_warmup": true,
+    "dtype": "bfloat16"
+  },
+  "env": {
+    "HF_HOME": "/runpod-volume/huggingface-cache",
+    "PYTHONUNBUFFERED": "1"
+  }
+}

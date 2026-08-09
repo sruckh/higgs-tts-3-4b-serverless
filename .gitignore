@@ -1,0 +1,26 @@
+# Agent / IDE meta directories (ICM workspace, memory, tooling state) —
+# these are working scaffolding for AI coding agents, not shipped code.
+.claude/
+.codex/
+.cursor/
+.goals/
+.icm/
+.outline/
+.serena/
+.vscode/
+.idea/
+
+# Agent contract files
+AGENTS.md
+CLAUDE.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# OS
+.DS_Store

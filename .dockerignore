@@ -1,0 +1,24 @@
+# Agent / IDE meta directories — never needed inside the build context or
+# the runtime image.
+.claude/
+.codex/
+.cursor/
+.git/
+.goals/
+.icm/
+.outline/
+.serena/
+.vscode/
+.idea/
+
+# Agent contract files
+AGENTS.md
+CLAUDE.md
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local-only / non-runtime docs
+*.md
+!README.md
