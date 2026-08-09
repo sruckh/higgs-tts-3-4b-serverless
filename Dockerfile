@@ -30,6 +30,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # exactly the "worker exited with exit code 1, no logs" symptom. 1200s gives
 # headroom above ENGINE_READY_TIMEOUT_SECONDS's own 600s engine-health poll
 # plus download time.
+#
+# HF_HUB_ENABLE_HF_TRANSFER=1 requires the `hf_transfer` package
+# (requirements.txt): huggingface_hub raises an unhandled ValueError the
+# instant this flag is set without it installed, which crashes the whole
+# module-scope bootstrap with a fast, immediately-repeating "exit code 1" —
+# confirmed as the actual cause of the 2026-08-09 crash loop. Do not set
+# this flag without keeping the pin in requirements.txt.
 ENV PATH="/root/.local/bin:${PATH}" \
     CUDA_VERSION=12.4 \
     PYTHONUNBUFFERED=1 \
