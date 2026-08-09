@@ -197,22 +197,29 @@ def _ensure_engine_running() -> None:
     )
 
     log_file = open(ENGINE_LOG_PATH, "wb")
-    _engine_process = subprocess.Popen(
-        [
-            "sgl-omni",
-            "serve",
-            "--model-path",
-            model_path,
-            "--host",
-            ENGINE_HOST,
-            "--port",
-            str(ENGINE_PORT),
-            "--tp",
-            tp_size,
-        ],
-        stdout=log_file,
-        stderr=subprocess.STDOUT,
-    )
+    try:
+        _engine_process = subprocess.Popen(
+            [
+                "sgl-omni",
+                "serve",
+                "--model-path",
+                model_path,
+                "--host",
+                ENGINE_HOST,
+                "--port",
+                str(ENGINE_PORT),
+                "--tp",
+                tp_size,
+            ],
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "'sgl-omni' executable not found on PATH — the sglang-omni CLI is not "
+            "installed in this image; the Dockerfile assumes lmsysorg/sglang-omni:dev "
+            "provides it and may need an explicit `pip install sglang-omni` step"
+        ) from exc
 
     print(
         f"[BOOTSTRAP] waiting for {HEALTH_ENDPOINT} (timeout {ENGINE_READY_TIMEOUT_SECONDS}s)...",
@@ -235,10 +242,26 @@ def _ensure_engine_running() -> None:
 
 
 def _bootstrap() -> None:
-    _print_diagnostics()
-    _run_env_check()
-    _ensure_model_cached()
-    _ensure_engine_running()
+    try:
+        _print_diagnostics()
+        _run_env_check()
+        _ensure_model_cached()
+        _ensure_engine_running()
+    except BaseException:
+        # A worker that dies here can be killed by RunPod's supervisor (or
+        # exit) faster than its stdout/stderr get shipped, which is why
+        # crash-loop investigations have repeatedly seen "exited with exit
+        # code 1" and nothing else. Print the full traceback explicitly,
+        # flush both streams, and hold briefly so the log pipeline has a
+        # real chance to capture it before the process actually dies.
+        import traceback
+
+        print("[BOOTSTRAP] FATAL: unhandled exception during cold-start bootstrap", flush=True)
+        traceback.print_exc()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        time.sleep(5)
+        raise
     print("[BOOTSTRAP] worker is warm and ready for jobs", flush=True)
 
 
