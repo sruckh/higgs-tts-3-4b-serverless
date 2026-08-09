@@ -13,10 +13,14 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import math
 import statistics
+import struct
 import sys
 import time
+import wave
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +29,25 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import handler as handler_module  # noqa: E402
 
 SAMPLE_RATE = 24000
+
+
+def _sample_reference_audio_base64(duration_seconds: float = 0.5, freq_hz: float = 220.0) -> str:
+    """Synthesize a tiny sine-wave WAV clip and return it base64-encoded, the
+    same shape a caller would upload as `references[].audio_base64` — no
+    file on disk or on the RunPod Network Volume involved."""
+    n_samples = int(SAMPLE_RATE * duration_seconds)
+    buf = BytesIO()
+    with wave.open(buf, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(SAMPLE_RATE)
+        frames = b"".join(
+            struct.pack("<h", int(32767 * 0.2 * math.sin(2 * math.pi * freq_hz * i / SAMPLE_RATE)))
+            for i in range(n_samples)
+        )
+        wav_file.writeframes(frames)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
 
 TEST_CASES: list[dict[str, Any]] = [
     {
@@ -37,7 +60,11 @@ TEST_CASES: list[dict[str, Any]] = [
             "input": {
                 "input": "This sentence should be spoken in the cloned voice.",
                 "references": [
-                    {"audio_path": "/workspace/samples/ref_voice_01.wav", "text": "Reference transcript sample."}
+                    {
+                        "audio_base64": _sample_reference_audio_base64(),
+                        "text": "Reference transcript sample.",
+                        "audio_format": "wav",
+                    }
                 ],
             }
         },

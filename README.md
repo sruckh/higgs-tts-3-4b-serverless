@@ -13,7 +13,7 @@ A [RunPod Serverless](https://www.runpod.io/serverless-gpu) worker that serves *
 
 ## What it does
 
-- **Zero-shot voice cloning** — pass a reference audio clip + transcript, no fine-tuning required.
+- **Zero-shot voice cloning** — upload a reference audio clip (base64) + transcript inline, no fine-tuning and no pre-staged files required.
 - **Inline delivery control** — emotion, style, prosody, and sound-effect tags mid-utterance (`<|emotion:elation|>`, `<|sfx:laughter|>Haha`).
 - **Streaming or unary audio** — Server-Sent Events for low time-to-first-audio, or a single base64 payload.
 - **Cold-start-aware caching** — model weights persist on a RunPod Network Volume so restarts don't re-download ~8GB of weights.
@@ -64,7 +64,7 @@ The engine only ever talks to `127.0.0.1:8000`; RunPod's job queue is the only e
     "input": "Text to synthesize.",
     "voice": "default",
     "references": [
-      { "audio_path": "/workspace/samples/ref.wav", "text": "Reference transcript." }
+      { "audio_base64": "<base64-encoded audio bytes>", "text": "Reference transcript.", "audio_format": "wav" }
     ],
     "response_format": "wav",
     "speed": 1.0,
@@ -79,7 +79,7 @@ The engine only ever talks to `127.0.0.1:8000`; RunPod's job queue is the only e
 | --- | --- | --- | --- |
 | `input` | string | — | required, ≤10,000 characters |
 | `voice` | string | — | either `voice` or `references` is required |
-| `references` | array | `[]` | `{audio_path, text}` pairs for zero-shot cloning |
+| `references` | array | `[]` | up to 4 `{audio_base64, text, audio_format}` clips for zero-shot cloning |
 | `response_format` | string | `"wav"` | one of `wav`, `mp3`, `opus`, `pcm` |
 | `speed` | number | `1.0` | |
 | `temperature` | number | `0.8` | |
@@ -87,6 +87,28 @@ The engine only ever talks to `127.0.0.1:8000`; RunPod's job queue is the only e
 | `stream` | boolean | `false` | SSE chunk stream instead of one payload |
 
 Unary responses return `{"audio_base64": "...", "response_format": "wav", "sample_rate": 24000}`. Streaming responses yield `{"audio_chunk": "...", "done": false}` events, ending with `done: true`; both modes surface engine failures as `{"error": "..."}` (invalid input, VRAM exhaustion, or engine timeout).
+
+### Voice cloning with an uploaded reference clip
+
+`references[].audio_base64` is the raw audio itself, base64-encoded — callers upload it inline; the worker never reads it from the RunPod Network Volume (that volume only holds the cached model weights). Encode a local clip and inline it into the job payload:
+
+```bash
+REF_B64=$(base64 -w0 my_voice_sample.wav)
+
+curl -s https://api.runpod.ai/v2/<ENDPOINT_ID>/runsync \
+  -H "Authorization: Bearer $RUNPOD_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "input": {
+          "input": "This will be spoken in the cloned voice.",
+          "references": [
+            { "audio_base64": "'"$REF_B64"'", "text": "Transcript of my_voice_sample.wav", "audio_format": "wav" }
+          ]
+        }
+      }'
+```
+
+`handler.py` decodes each reference to a short-lived local temp file for the engine call and deletes it once the job finishes — reference clips are capped at 25MB decoded and 4 per request.
 
 ### Inline control tags
 
@@ -168,6 +190,7 @@ This exercises plain synthesis, zero-shot cloning, SSE streaming, and inline con
 - Each worker runs exactly one local engine instance; scaling happens across workers, not within one.
 - `bosonai/higgs-tts-3-4b` may be gated on Hugging Face — set `HF_TOKEN` before first deploy.
 - Cold start time depends on whether the Network Volume already has cached weights; the first worker to boot on a fresh volume pays the full download.
+- Reference clips travel inline as base64 in the request body — keep them short (a few seconds); large clips inflate payload size and job latency.
 
 ## License
 

@@ -11,6 +11,8 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
+import tempfile
 from collections.abc import Generator
 from typing import Any
 
@@ -28,14 +30,49 @@ SPEECH_ENDPOINT = f"{ENGINE_BASE_URL}/v1/audio/speech"
 REQUEST_TIMEOUT_SECONDS = 120
 STREAM_CHUNK_TIMEOUT_SECONDS = 60
 
+# Reference clips arrive as base64 in the job input (callers upload them;
+# they have no access to the RunPod Network Volume). Decode each one to a
+# short-lived local file the engine can read, then delete it once the job
+# finishes — reference audio never touches persistent storage.
+REFERENCE_TMP_DIR = os.environ.get("REFERENCE_TMP_DIR", "/tmp/higgs-refs")
 
-def _build_engine_payload(job_input: dict[str, Any]) -> dict[str, Any]:
+
+def _materialize_references(references: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Decode base64 reference audio into local temp files for the engine.
+
+    Returns (engine_references, temp_paths); engine_references use
+    `audio_path` since the engine reads local files, while temp_paths lets
+    the caller clean up after the job completes.
+    """
+    os.makedirs(REFERENCE_TMP_DIR, exist_ok=True)
+    engine_refs: list[dict[str, Any]] = []
+    temp_paths: list[str] = []
+    for ref in references:
+        audio_bytes = base64.b64decode(ref["audio_base64"])
+        suffix = f".{ref.get('audio_format', 'wav')}"
+        fd, path = tempfile.mkstemp(prefix="ref-", suffix=suffix, dir=REFERENCE_TMP_DIR)
+        with os.fdopen(fd, "wb") as f:
+            f.write(audio_bytes)
+        temp_paths.append(path)
+        engine_refs.append({"audio_path": path, "text": ref["text"]})
+    return engine_refs, temp_paths
+
+
+def _cleanup_temp_paths(paths: list[str]) -> None:
+    for path in paths:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _build_engine_payload(job_input: dict[str, Any], engine_references: list[dict[str, Any]]) -> dict[str, Any]:
     """Translate validated RunPod job input into an OpenAI speech request."""
     return {
         "model": job_input["model"],
         "input": job_input["input"],
         "voice": job_input.get("voice"),
-        "references": job_input.get("references", []),
+        "references": engine_references,
         "response_format": job_input["response_format"],
         "speed": job_input["speed"],
         "temperature": job_input["temperature"],
@@ -44,7 +81,9 @@ def _build_engine_payload(job_input: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _stream_audio_chunks(payload: dict[str, Any]) -> Generator[dict[str, Any], None, None]:
+def _stream_audio_chunks(
+    payload: dict[str, Any], temp_paths: list[str]
+) -> Generator[dict[str, Any], None, None]:
     """Yield base64-encoded audio chunks as they arrive over SSE from the
     local engine. Each yielded dict matches RunPod's streaming output
     convention (`runpod.serverless.start` forwards generator yields as
@@ -83,6 +122,8 @@ def _stream_audio_chunks(payload: dict[str, Any]) -> Generator[dict[str, Any], N
         yield {"error": f"engine connection error: {exc}"}
     except ValidationError as exc:
         yield {"error": str(exc)}
+    finally:
+        _cleanup_temp_paths(temp_paths)
 
 
 def _unary_audio_response(payload: dict[str, Any]) -> dict[str, Any]:
@@ -119,12 +160,21 @@ def handler(job: dict[str, Any]):
         log.warning("Invalid job input: %s", exc)
         return {"error": f"invalid input: {exc}"}
 
-    payload = _build_engine_payload(job_input)
+    try:
+        engine_references, temp_paths = _materialize_references(job_input.get("references", []))
+    except Exception as exc:  # noqa: BLE001 - surface as a clean job error, not a worker crash
+        log.error("Failed to materialize reference audio: %s", exc)
+        return {"error": f"failed to process reference audio: {exc}"}
+
+    payload = _build_engine_payload(job_input, engine_references)
 
     if job_input["stream"]:
-        return _stream_audio_chunks(payload)
+        return _stream_audio_chunks(payload, temp_paths)
 
-    return _unary_audio_response(payload)
+    try:
+        return _unary_audio_response(payload)
+    finally:
+        _cleanup_temp_paths(temp_paths)
 
 
 if __name__ == "__main__":

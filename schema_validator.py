@@ -4,6 +4,8 @@ runpod_job_input).
 """
 from __future__ import annotations
 
+import base64
+import binascii
 from typing import Any
 
 DEFAULTS = {
@@ -16,7 +18,13 @@ DEFAULTS = {
 }
 
 ALLOWED_RESPONSE_FORMATS = {"wav", "mp3", "opus", "pcm"}
+ALLOWED_REFERENCE_AUDIO_FORMATS = {"wav", "mp3", "opus", "flac", "pcm"}
 MAX_INPUT_CHARS = 10_000
+# Reference clips arrive inline as base64 (callers upload them; there is no
+# network-volume path to read from), so bound decoded size and count to keep
+# job payloads and temp-file usage sane.
+MAX_REFERENCE_AUDIO_BYTES = 25 * 1024 * 1024
+MAX_REFERENCES = 4
 
 
 class ValidationError(ValueError):
@@ -30,15 +38,40 @@ def _require_str(value: Any, field: str) -> str:
 
 
 def validate_reference(ref: dict[str, Any], index: int) -> dict[str, Any]:
+    """Validate one zero-shot voice-cloning reference. Reference audio is
+    uploaded by the caller as inline base64 — never a path on the RunPod
+    Network Volume, which the caller has no access to."""
     if not isinstance(ref, dict):
         raise ValidationError(f"references[{index}] must be an object")
-    audio_path = ref.get("audio_path")
+
+    audio_b64 = ref.get("audio_base64")
     text = ref.get("text")
-    if not isinstance(audio_path, str) or not audio_path.strip():
-        raise ValidationError(f"references[{index}].audio_path must be a non-empty string")
+    if not isinstance(audio_b64, str) or not audio_b64.strip():
+        raise ValidationError(
+            f"references[{index}].audio_base64 must be a non-empty base64-encoded audio string"
+        )
     if not isinstance(text, str) or not text.strip():
         raise ValidationError(f"references[{index}].text must be a non-empty string")
-    return {"audio_path": audio_path, "text": text}
+
+    try:
+        decoded_size = len(base64.b64decode(audio_b64, validate=True))
+    except (binascii.Error, ValueError) as exc:
+        raise ValidationError(f"references[{index}].audio_base64 is not valid base64: {exc}") from exc
+
+    if decoded_size == 0:
+        raise ValidationError(f"references[{index}].audio_base64 decodes to empty audio")
+    if decoded_size > MAX_REFERENCE_AUDIO_BYTES:
+        raise ValidationError(
+            f"references[{index}].audio_base64 exceeds max size of {MAX_REFERENCE_AUDIO_BYTES} bytes"
+        )
+
+    audio_format = ref.get("audio_format", "wav")
+    if audio_format not in ALLOWED_REFERENCE_AUDIO_FORMATS:
+        raise ValidationError(
+            f"references[{index}].audio_format must be one of {sorted(ALLOWED_REFERENCE_AUDIO_FORMATS)}"
+        )
+
+    return {"audio_base64": audio_b64, "text": text, "audio_format": audio_format}
 
 
 def validate_job_input(raw_input: dict[str, Any]) -> dict[str, Any]:
@@ -63,6 +96,8 @@ def validate_job_input(raw_input: dict[str, Any]) -> dict[str, Any]:
     references = raw_input.get("references", []) or []
     if not isinstance(references, list):
         raise ValidationError("'references' must be a list")
+    if len(references) > MAX_REFERENCES:
+        raise ValidationError(f"'references' supports at most {MAX_REFERENCES} entries")
     normalized["references"] = [validate_reference(r, i) for i, r in enumerate(references)]
 
     response_format = raw_input.get("response_format", DEFAULTS["response_format"])
