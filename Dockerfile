@@ -67,7 +67,11 @@ RUN uv pip install --system --break-system-packages --no-cache -r requirements.t
 # (FileNotFoundError: [Errno 2] No such file or directory: 'sgl-omni'),
 # which crashed every worker immediately on cold start. Install it
 # explicitly rather than assuming the base image provides it.
-RUN uv pip install --system --break-system-packages --no-cache "sglang-omni==0.1.1"
+# --prerelease=allow: sglang-omni==0.1.1 pins flash-attn-4>=4.0.0b18, a
+# beta-only release (no stable flash-attn-4 exists yet on PyPI); without
+# this flag uv's resolver rejects the whole dependency set outright
+# (confirmed live 2026-08-09 build failure).
+RUN uv pip install --system --break-system-packages --no-cache --prerelease=allow "sglang-omni==0.1.1"
 
 # --- Application source ------------------------------------------------
 # .dockerignore strips dot-directories, AGENTS.md, CLAUDE.md, and other
