@@ -61,6 +61,14 @@ WORKDIR /workspace
 COPY requirements.txt /workspace/requirements.txt
 RUN uv pip install --system --break-system-packages --no-cache -r requirements.txt
 
+# sglang-omni provides the `sgl-omni` CLI (`sgl-omni serve ...`) that
+# handler.py launches as a subprocess. lmsysorg/sglang-omni:dev does NOT
+# have it pre-installed on PATH — confirmed live 2026-08-09
+# (FileNotFoundError: [Errno 2] No such file or directory: 'sgl-omni'),
+# which crashed every worker immediately on cold start. Install it
+# explicitly rather than assuming the base image provides it.
+RUN uv pip install --system --break-system-packages --no-cache "sglang-omni==0.1.1"
+
 # --- Application source ------------------------------------------------
 # .dockerignore strips dot-directories, AGENTS.md, CLAUDE.md, and other
 # non-runtime markdown before this hits the daemon.
