@@ -6,7 +6,12 @@ set -euo pipefail
 
 REQUIRED_CUDA="12.4"
 REQUIRED_PYTHON="3.12"
-MIN_VRAM_GB=32
+# 28, not 32: weights are ~9.3GB bf16 and --mem-fraction-static caps the
+# engine's memory pool well under total VRAM (see handler.py), so a real
+# "32GB" card is enough — but such cards often report a bit under 32 in
+# GiB via nvidia-smi (e.g. RTX 5090 reports ~31.8GiB), which a hard 32
+# floor would reject for no real reason.
+MIN_VRAM_GB=28
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 ok()   { echo "OK:   $1"; }

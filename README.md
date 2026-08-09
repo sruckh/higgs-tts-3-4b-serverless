@@ -152,8 +152,9 @@ Lower real-time factor is better (< 1.0 means faster than real-time playback).
 | `RUNPOD_SKIP_GPU_CHECK` | `true` | Set on the image; skips a RunPod SDK fitness check that false-positive OOMs on this worker's VRAM footprint |
 | `RUNPOD_SKIP_AUTO_SYSTEM_CHECKS` | `true` | Set on the image; same reason as above |
 | `RUNPOD_INIT_TIMEOUT` | `1200` | Set on the image; RunPod kills a worker as unhealthy once cold start exceeds a 7-minute default, which a cache-miss cold start (network download + engine warm-up) here can exceed — this is the most common cause of "worker exited with exit code 1" with no logs |
+| `MEM_FRACTION_STATIC` | `0.75` | Fraction of GPU memory `sgl-omni serve` reserves for weights + KV cache. Weights are only ~9.3GB bf16; SGLang's own default (~0.88) is sized for high concurrency and can overshoot on a real 32GB card, which often reports a bit under 32GiB via `nvidia-smi` (e.g. RTX 5090 reports ~31.8GiB) |
 
-Hardware: NVIDIA GPU with **≥32GB VRAM** (A100 80GB, H100 80GB, or L40S 48GB), CUDA 12.4, Python 3.12.
+Hardware: NVIDIA GPU with **≥28GB VRAM** (32GB-class cards such as RTX 5090, or A100/H100/L40S for higher concurrency), CUDA 12.4, Python 3.12.
 
 ### Model caching (do this — it's the single biggest cold-start lever)
 
@@ -206,7 +207,7 @@ This exercises plain synthesis, zero-shot cloning, SSE streaming, and inline con
 
 ## Limitations
 
-- Requires a CUDA GPU with ≥32GB VRAM — there is no CPU fallback.
+- Requires a CUDA GPU with ≥28GB VRAM — there is no CPU fallback.
 - Each worker runs exactly one local engine instance; scaling happens across workers, not within one.
 - `bosonai/higgs-tts-3-4b` may be gated on Hugging Face — set `HF_TOKEN` before first deploy.
 - Cold start time depends on whether the Network Volume already has cached weights; the first worker to boot on a fresh volume pays the full download.

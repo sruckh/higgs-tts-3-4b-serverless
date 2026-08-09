@@ -20,6 +20,7 @@ MODEL_PATH="${MODEL_REPO_ID:-bosonai/higgs-tts-3-4b}"
 HOST="127.0.0.1"
 PORT="8000"
 TP_SIZE="${TP_SIZE:-1}"
+MEM_FRACTION_STATIC="${MEM_FRACTION_STATIC:-0.75}"
 HEALTH_URL="http://${HOST}:${PORT}/health"
 READY_TIMEOUT_SECONDS="${READY_TIMEOUT_SECONDS:-300}"
 POLL_INTERVAL_SECONDS="${POLL_INTERVAL_SECONDS:-2}"
@@ -29,13 +30,14 @@ if [[ "${1:-}" == "--background" ]]; then
     RUN_BACKGROUND=1
 fi
 
-echo "start_engine: launching sgl-omni serve --model-path ${MODEL_PATH} --port ${PORT} --host ${HOST} --tp ${TP_SIZE}"
+echo "start_engine: launching sgl-omni serve --model-path ${MODEL_PATH} --port ${PORT} --host ${HOST} --tp ${TP_SIZE} --mem-fraction-static ${MEM_FRACTION_STATIC}"
 
 launch_cmd=(sgl-omni serve
     --model-path "${MODEL_PATH}"
     --host "${HOST}"
     --port "${PORT}"
-    --tp "${TP_SIZE}")
+    --tp "${TP_SIZE}"
+    --mem-fraction-static "${MEM_FRACTION_STATIC}")
 
 if [[ "${RUN_BACKGROUND}" -eq 1 ]]; then
     "${launch_cmd[@]}" >/workspace/engine.log 2>&1 &
