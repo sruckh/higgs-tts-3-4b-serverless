@@ -86,6 +86,15 @@ def verify_snapshot(local_dir: str) -> None:
               len(files), has_safetensors, has_config, has_tokenizer)
 
 
+def hub_cache_dir(cache_dir: str) -> str:
+    """The actual Hugging Face Hub snapshot cache lives under `<cache_dir>/hub`
+    — both huggingface_hub's own HF_HOME-based resolution and RunPod's native
+    model cache (`/runpod-volume/huggingface-cache/hub/models--org--name/...`)
+    use this exact nesting. Passing `cache_dir` bare (without `/hub`) to
+    snapshot_download writes to a path nothing else looks at."""
+    return os.path.join(cache_dir, "hub")
+
+
 def download(repo_id: str, revision: str, cache_dir: str) -> str:
     from huggingface_hub import snapshot_download
 
@@ -93,13 +102,14 @@ def download(repo_id: str, revision: str, cache_dir: str) -> str:
     if not token:
         log.warning("HF_TOKEN not set; proceeding unauthenticated (fails for gated repos)")
 
-    os.makedirs(cache_dir, exist_ok=True)
-    log.info("Downloading %s@%s into %s ...", repo_id, revision, cache_dir)
+    hub_dir = hub_cache_dir(cache_dir)
+    os.makedirs(hub_dir, exist_ok=True)
+    log.info("Downloading %s@%s into %s ...", repo_id, revision, hub_dir)
 
     local_dir = snapshot_download(
         repo_id=repo_id,
         revision=revision,
-        cache_dir=cache_dir,
+        cache_dir=hub_dir,
         token=token,
         max_workers=8,
         resume_download=True,

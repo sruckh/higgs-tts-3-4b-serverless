@@ -28,6 +28,9 @@ docker push registry/higgs-tts3-runpod:latest
 # 2. Create the RunPod Serverless endpoint
 #    deploy/runpod_template.json has the GPU, Network Volume, and env var
 #    defaults — import it via the RunPod console or `runpodctl`.
+#    Then set Advanced settings -> Model = bosonai/higgs-tts-3-4b so RunPod
+#    pre-stages the weights before the worker starts (unbilled download
+#    wait) — this is a console-only setting, see Configuration below.
 
 # 3. Call it
 curl -s https://api.runpod.ai/v2/<ENDPOINT_ID>/runsync \
@@ -47,12 +50,12 @@ A gated `bosonai/higgs-tts-3-4b` requires `HF_TOKEN` set on the endpoint; see [C
 ## How it works
 
 <p align="center">
-  <img src="./assets/readme/architecture.svg" width="100%" alt="Container lifecycle: entrypoint.sh runs a one-time cold start, then handler.py serves every job against the local SGLang-Omni engine">
+  <img src="./assets/readme/architecture.svg" width="100%" alt="Container lifecycle: handler.py bootstraps the engine at module scope, then runpod.serverless.start() serves every job against the local SGLang-Omni engine">
 </p>
 
-Each worker runs a **one-time cold start** (`entrypoint.sh`): resolve the Hugging Face cache path, verify CUDA/GPU/audio libraries, fetch and verify model weights, then launch `sgl-omni serve` in the background and poll `/health` until it's ready. Once healthy, `handler.py` takes over in the foreground and, for **every job**, validates the RunPod payload, forwards it to the local engine over HTTP, and relays the audio response back through RunPod — as a single base64 payload or an SSE-style generator of chunks.
+`handler.py` is the container's `CMD` — there is no bash entrypoint. RunPod's setup validator and worker supervisor need to see a live `runpod`-importing Python process almost immediately, so `handler.py` runs its own **one-time cold-start bootstrap at module scope**: verify CUDA/GPU/audio libraries; check `/runpod-volume/huggingface-cache/hub/models--bosonai--higgs-tts-3-4b/` for an already-cached snapshot (RunPod's own model cache, or a prior worker's download) and skip straight to the engine on a hit — only downloading from Hugging Face when nothing is cached; launch `sgl-omni serve` as a child process; and poll `/health` until it's ready — all before `runpod.serverless.start()` is ever called. Only then does it register with RunPod and, for **every job**, validate the payload, forward it to the local engine over HTTP, and relay the audio response back — as a single base64 payload or an SSE-style generator of chunks.
 
-The engine only ever talks to `127.0.0.1:8000`; RunPod's job queue is the only external surface.
+The engine only ever talks to `127.0.0.1:8000`; RunPod's job queue is the only external surface. `RUNPOD_SKIP_GPU_CHECK` / `RUNPOD_SKIP_AUTO_SYSTEM_CHECKS` are set on the image because the RunPod SDK's own post-model-load fitness checks otherwise false-positive OOM on this worker's VRAM footprint.
 
 ## API
 
@@ -108,7 +111,7 @@ curl -s https://api.runpod.ai/v2/<ENDPOINT_ID>/runsync \
       }'
 ```
 
-`handler.py` decodes each reference to a short-lived local temp file for the engine call and deletes it once the job finishes — reference clips are capped at 25MB decoded and 4 per request.
+`handler.py` decodes each reference to a short-lived local temp file for the engine call and deletes it once the job finishes. Reference audio is capped at 2MB decoded per clip (~41s of 24kHz/16-bit/mono WAV) and 6MB decoded combined across up to 4 clips — sized to stay well under RunPod's [`/run` 10MB / `/runsync` 20MB payload limits](https://docs.runpod.io/serverless/workers/handler-functions#payload-limits) once base64-inflated.
 
 ### Inline control tags
 
@@ -141,27 +144,39 @@ Lower real-time factor is better (< 1.0 means faster than real-time playback).
 | `MODEL_REPO_ID` | `bosonai/higgs-tts-3-4b` | Hugging Face repo to serve |
 | `MODEL_REVISION` | `main` | Model revision/branch |
 | `HF_TOKEN` | — | Required if the model repo is gated |
-| `HF_HOME` | `/runpod-volume/huggingface-cache` | Weight cache path; point it at the mounted Network Volume |
+| `HF_HOME` | `/runpod-volume/huggingface-cache` | Weight cache root; the actual snapshot lives under `HF_HOME/hub/...`, matching both Hugging Face's own convention and RunPod's model-cache layout |
 | `BAKE_INTO_IMAGE` | `0` | Set to `1` to cache weights inside the image instead of a Network Volume |
 | `SKIP_MODEL_DOWNLOAD` | `0` | Set to `1` if weights are already present at `HF_HOME` |
 | `TP_SIZE` | `1` | Tensor-parallel degree passed to `sgl-omni serve` |
+| `ENGINE_READY_TIMEOUT_SECONDS` | `600` | How long `handler.py`'s bootstrap waits for `sgl-omni serve` to report healthy before failing the worker |
+| `RUNPOD_SKIP_GPU_CHECK` | `true` | Set on the image; skips a RunPod SDK fitness check that false-positive OOMs on this worker's VRAM footprint |
+| `RUNPOD_SKIP_AUTO_SYSTEM_CHECKS` | `true` | Set on the image; same reason as above |
 
 Hardware: NVIDIA GPU with **≥32GB VRAM** (A100 80GB, H100 80GB, or L40S 48GB), CUDA 12.4, Python 3.12.
+
+### Model caching (do this — it's the single biggest cold-start lever)
+
+RunPod can pre-stage `bosonai/higgs-tts-3-4b` on the worker host **before the container even starts**, and that download wait isn't billed. This is a **console-only setting** (as of 2026-08-09 it isn't in the public REST v1 `POST /templates` or `POST /endpoints` schema, so it can't be set from `deploy/runpod_template.json`):
+
+1. RunPod console → your endpoint → **Manage → Edit Endpoint** (or set it while creating a new one).
+2. **Advanced settings → Model** → `bosonai/higgs-tts-3-4b`.
+3. Add your Hugging Face token there too if the repo is gated.
+
+`handler.py`'s bootstrap checks `/runpod-volume/huggingface-cache/hub/models--bosonai--higgs-tts-3-4b/` for a snapshot first and skips its own download entirely on a hit — whether that hit comes from RunPod's cache or a previous worker's run on the same Network Volume. Each endpoint supports exactly one cached model.
 
 ## Project layout
 
 ```text
 .
-├── Dockerfile              # final worker image (base env + engine + handler)
-├── entrypoint.sh           # cold start orchestration -> exec handler.py
-├── handler.py               # RunPod serverless handler
+├── Dockerfile              # final worker image (base env + engine + handler); CMD runs handler.py directly
+├── handler.py               # RunPod serverless handler + cold-start bootstrap (no bash entrypoint)
 ├── schema_validator.py      # request/response validation
 ├── requirements.txt
 ├── scripts/
-│   ├── base_env_check.sh    # CUDA / GPU / audio-lib sanity check
-│   ├── cache_config.sh      # resolves HF_HOME (network volume vs. baked)
-│   ├── download_model.py    # snapshot_download + integrity verification
-│   └── start_engine.sh      # launches sgl-omni serve, polls /health
+│   ├── base_env_check.sh    # CUDA / GPU / audio-lib sanity check (run non-fatally by handler.py's bootstrap)
+│   ├── cache_config.sh      # resolves HF_HOME (network volume vs. baked); for local/manual runs
+│   ├── download_model.py    # snapshot_download + integrity verification; imported directly by handler.py
+│   └── start_engine.sh      # launches sgl-omni serve, polls /health; for local/manual runs
 ├── config/
 │   └── engine_config.json   # engine runtime parameters
 ├── deploy/
@@ -173,13 +188,17 @@ Hardware: NVIDIA GPU with **≥32GB VRAM** (A100 80GB, H100 80GB, or L40S 48GB),
 
 ## Local testing
 
-`tests/test_local.py` calls `handler.handler()` directly — no RunPod queue needed — but it still expects a live engine on `127.0.0.1:8000`, so run it on a GPU host with the engine already started:
+`tests/test_local.py` calls `handler.handler()` directly — no RunPod queue needed. Importing `handler` runs the same cold-start bootstrap the container uses (env check, model download, engine launch + health poll), so it needs a GPU host either way. Two options:
 
 ```bash
+# Option A — let handler.py bootstrap everything itself
+python3 tests/test_local.py --concurrency-sweep
+
+# Option B — pre-start the engine manually (bootstrap detects it's already
+# healthy and skips launching a duplicate) and skip the redundant download
 source scripts/cache_config.sh
 scripts/start_engine.sh --background   # waits for /health before returning
-
-python3 tests/test_local.py --concurrency-sweep
+SKIP_MODEL_DOWNLOAD=1 python3 tests/test_local.py --concurrency-sweep
 ```
 
 This exercises plain synthesis, zero-shot cloning, SSE streaming, and inline control tags, then writes fresh numbers to `tests/benchmark_results.json`.

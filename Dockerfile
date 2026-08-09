@@ -17,6 +17,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
+# RUNPOD_SKIP_GPU_CHECK / RUNPOD_SKIP_AUTO_SYSTEM_CHECKS: the RunPod SDK's
+# own post-model-load fitness checks (GPU memory probe, CUDA init) can
+# false-positive OOM on otherwise-healthy heavy-VRAM workers and mark them
+# unhealthy; skip them.
 ENV PATH="/root/.local/bin:${PATH}" \
     CUDA_VERSION=12.4 \
     PYTHONUNBUFFERED=1 \
@@ -25,7 +29,9 @@ ENV PATH="/root/.local/bin:${PATH}" \
     DEBIAN_FRONTEND=noninteractive \
     HF_HOME=/runpod-volume/huggingface-cache \
     HF_HUB_ENABLE_HF_TRANSFER=1 \
-    TRANSFORMERS_CACHE=/runpod-volume/huggingface-cache
+    TRANSFORMERS_CACHE=/runpod-volume/huggingface-cache \
+    RUNPOD_SKIP_GPU_CHECK=true \
+    RUNPOD_SKIP_AUTO_SYSTEM_CHECKS=true
 
 RUN command -v uv >/dev/null 2>&1 || (curl -LsSf https://astral.sh/uv/install.sh | sh)
 
@@ -43,8 +49,20 @@ RUN uv pip install --system --break-system-packages --no-cache -r requirements.t
 # non-runtime markdown before this hits the daemon.
 COPY . /workspace
 
-RUN chmod +x /workspace/entrypoint.sh /workspace/scripts/*.sh
+RUN chmod +x /workspace/scripts/*.sh
 
 EXPOSE 8000
 
-ENTRYPOINT ["/workspace/entrypoint.sh"]
+# handler.py must be the container's process from the first instant: RunPod's
+# setup-time validator and worker supervisor both need to see a live
+# runpod-importing Python process almost immediately, which a separate bash
+# orchestration script (waiting on model download + engine warm-up before
+# ever exec'ing into Python) can't provide. handler.py does its own
+# cold-start bootstrap at module scope before runpod.serverless.start().
+#
+# ENTRYPOINT [] resets any ENTRYPOINT the base image carries (unverified for
+# lmsysorg/sglang-omni:dev) — inheriting one would turn CMD into arguments
+# appended to it instead of the actual start command, which has separately
+# caused this exact "worker exits, zero logs" symptom before.
+ENTRYPOINT []
+CMD ["python3", "-u", "/workspace/handler.py"]

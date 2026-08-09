@@ -20,10 +20,15 @@ DEFAULTS = {
 ALLOWED_RESPONSE_FORMATS = {"wav", "mp3", "opus", "pcm"}
 ALLOWED_REFERENCE_AUDIO_FORMATS = {"wav", "mp3", "opus", "flac", "pcm"}
 MAX_INPUT_CHARS = 10_000
-# Reference clips arrive inline as base64 (callers upload them; there is no
-# network-volume path to read from), so bound decoded size and count to keep
-# job payloads and temp-file usage sane.
-MAX_REFERENCE_AUDIO_BYTES = 25 * 1024 * 1024
+# Reference clips arrive inline as base64 in the job payload — RunPod caps
+# request bodies at 10MB for /run and 20MB for /runsync (verified against
+# https://docs.runpod.io/serverless/workers/handler-functions#payload-limits
+# 2026-08-09). Base64 inflates decoded bytes by ~4/3, so a 6MB decoded total
+# becomes ~8MB encoded, leaving headroom under the stricter /run ceiling.
+# 2MB per clip (~41s of 24kHz/16-bit/mono WAV) covers realistic voice-cloning
+# references; the combined cap is what actually protects the request size.
+MAX_REFERENCE_AUDIO_BYTES = 2 * 1024 * 1024
+MAX_TOTAL_REFERENCE_AUDIO_BYTES = 6 * 1024 * 1024
 MAX_REFERENCES = 4
 
 
@@ -37,10 +42,12 @@ def _require_str(value: Any, field: str) -> str:
     return value
 
 
-def validate_reference(ref: dict[str, Any], index: int) -> dict[str, Any]:
+def validate_reference(ref: dict[str, Any], index: int) -> tuple[dict[str, Any], int]:
     """Validate one zero-shot voice-cloning reference. Reference audio is
     uploaded by the caller as inline base64 — never a path on the RunPod
-    Network Volume, which the caller has no access to."""
+    Network Volume, which the caller has no access to. Returns the
+    normalized reference plus its decoded byte size, so the caller can
+    enforce a combined cap across all references in the job."""
     if not isinstance(ref, dict):
         raise ValidationError(f"references[{index}] must be an object")
 
@@ -71,7 +78,7 @@ def validate_reference(ref: dict[str, Any], index: int) -> dict[str, Any]:
             f"references[{index}].audio_format must be one of {sorted(ALLOWED_REFERENCE_AUDIO_FORMATS)}"
         )
 
-    return {"audio_base64": audio_b64, "text": text, "audio_format": audio_format}
+    return {"audio_base64": audio_b64, "text": text, "audio_format": audio_format}, decoded_size
 
 
 def validate_job_input(raw_input: dict[str, Any]) -> dict[str, Any]:
@@ -98,7 +105,18 @@ def validate_job_input(raw_input: dict[str, Any]) -> dict[str, Any]:
         raise ValidationError("'references' must be a list")
     if len(references) > MAX_REFERENCES:
         raise ValidationError(f"'references' supports at most {MAX_REFERENCES} entries")
-    normalized["references"] = [validate_reference(r, i) for i, r in enumerate(references)]
+
+    normalized_references: list[dict[str, Any]] = []
+    total_reference_bytes = 0
+    for i, r in enumerate(references):
+        normalized_ref, decoded_size = validate_reference(r, i)
+        total_reference_bytes += decoded_size
+        if total_reference_bytes > MAX_TOTAL_REFERENCE_AUDIO_BYTES:
+            raise ValidationError(
+                f"combined 'references' audio exceeds max total of {MAX_TOTAL_REFERENCE_AUDIO_BYTES} bytes"
+            )
+        normalized_references.append(normalized_ref)
+    normalized["references"] = normalized_references
 
     response_format = raw_input.get("response_format", DEFAULTS["response_format"])
     if response_format not in ALLOWED_RESPONSE_FORMATS:

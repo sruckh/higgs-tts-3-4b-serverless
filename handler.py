@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
-"""Stage 04 — RunPod Serverless handler for higgs-tts3-runpod.
+"""RunPod Serverless handler for higgs-tts3-runpod.
 
-Bridges RunPod job input (see `_config/API_SCHEMA.json`) to the local
-SGLang-Omni engine's OpenAI-compatible `/v1/audio/speech` endpoint started
-by stage 03 (`start_engine.sh`), returning either a unary base64-encoded
-audio payload or a generator of SSE audio chunks when `stream=True`.
+Bridges RunPod job input (see `_config/API_SCHEMA.json`) to a local
+SGLang-Omni engine's OpenAI-compatible `/v1/audio/speech` endpoint,
+returning either a unary base64-encoded audio payload or a generator of SSE
+audio chunks when `stream=True`.
+
+RunPod needs to see a live `runpod`-importing Python process almost
+immediately, or its setup-time validator and worker supervisor both treat
+the container as broken. So — unlike an earlier version of this file —
+nothing here waits behind a separate bash entrypoint: this module does its
+own cold-start bootstrap (env check, model download, engine launch +
+health poll) at import time, before `runpod.serverless.start()` is ever
+called, mirroring RunPod's own "load heavy state at module scope" pattern
+for long-cold-start workers.
 """
 from __future__ import annotations
 
@@ -12,29 +21,230 @@ import base64
 import json
 import logging
 import os
+import subprocess
+import sys
 import tempfile
+import time
 from collections.abc import Generator
+from pathlib import Path
 from typing import Any
 
 import requests
 import runpod
 
-from schema_validator import ValidationError, validate_engine_response, validate_job_input
+# Unbuffered stdout: log lines only help if they're flushed before a slow
+# cold start gets torn down by RunPod's worker supervisor.
+sys.stdout.reconfigure(line_buffering=True)
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "scripts"))
+import download_model as _download_model  # noqa: E402
+
+from schema_validator import ValidationError, validate_engine_response, validate_job_input  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("handler")
 
-ENGINE_BASE_URL = "http://127.0.0.1:8000"
+ENGINE_HOST = "127.0.0.1"
+ENGINE_PORT = 8000
+ENGINE_BASE_URL = f"http://{ENGINE_HOST}:{ENGINE_PORT}"
 SPEECH_ENDPOINT = f"{ENGINE_BASE_URL}/v1/audio/speech"
+HEALTH_ENDPOINT = f"{ENGINE_BASE_URL}/health"
+ENGINE_LOG_PATH = "/workspace/engine.log"
 
 REQUEST_TIMEOUT_SECONDS = 120
 STREAM_CHUNK_TIMEOUT_SECONDS = 60
+ENGINE_READY_TIMEOUT_SECONDS = int(os.environ.get("ENGINE_READY_TIMEOUT_SECONDS", "600"))
+ENGINE_POLL_INTERVAL_SECONDS = 2
 
 # Reference clips arrive as base64 in the job input (callers upload them;
 # they have no access to the RunPod Network Volume). Decode each one to a
 # short-lived local file the engine can read, then delete it once the job
 # finishes — reference audio never touches persistent storage.
 REFERENCE_TMP_DIR = os.environ.get("REFERENCE_TMP_DIR", "/tmp/higgs-refs")
+
+_engine_process: subprocess.Popen[bytes] | None = None
+
+
+# --------------------------------------------------------------------------
+# Cold-start bootstrap — runs once at module import, before
+# runpod.serverless.start(). Everything here must print with flush=True.
+# --------------------------------------------------------------------------
+
+
+def _print_diagnostics() -> None:
+    print("=" * 75, flush=True)
+    print("=== higgs-tts3-runpod worker :: startup diagnostics ===", flush=True)
+    print(f"[DEBUG] Python:          {sys.version.split()[0]}", flush=True)
+    print(f"[DEBUG] runpod SDK:      {getattr(runpod, '__version__', 'unknown')}", flush=True)
+    print(
+        f"[DEBUG] MODEL_REPO_ID:   {os.environ.get('MODEL_REPO_ID', _download_model.DEFAULT_REPO_ID)}",
+        flush=True,
+    )
+    print(
+        f"[DEBUG] HF_TOKEN set:    {bool(os.environ.get('HF_TOKEN') or os.environ.get('HUGGING_FACE_HUB_TOKEN'))}",
+        flush=True,
+    )
+    print(f"[DEBUG] Network Volume:  {os.path.isdir('/runpod-volume')}", flush=True)
+    try:
+        gpu = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        gpu_info = gpu.stdout.strip() or gpu.stderr.strip() or "no output"
+    except (OSError, subprocess.SubprocessError) as exc:
+        gpu_info = f"nvidia-smi unavailable ({exc})"
+    print(f"[DEBUG] GPU:             {gpu_info}", flush=True)
+    print("=" * 75, flush=True)
+
+
+def _run_env_check() -> None:
+    """Best-effort, non-fatal CUDA/audio-lib sanity check — never blocks
+    startup, only informs the log."""
+    script = Path(__file__).resolve().parent / "scripts" / "base_env_check.sh"
+    try:
+        result = subprocess.run(
+            [str(script)], capture_output=True, text=True, timeout=30, check=False
+        )
+        print(result.stdout, flush=True)
+        if result.returncode != 0:
+            print(
+                f"[BOOTSTRAP] base_env_check.sh reported issues (exit {result.returncode}), continuing",
+                flush=True,
+            )
+            print(result.stderr, flush=True)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"[BOOTSTRAP] base_env_check.sh failed to run: {exc}", flush=True)
+
+
+def _resolve_cached_snapshot(cache_dir: str, repo_id: str) -> str | None:
+    """Resolve an already-present local HF snapshot with no network access,
+    following RunPod's cached-model layout (`<cache_dir>/hub/models--org--
+    name/...`) and its documented resolution order: `refs/main` first, else
+    the newest non-empty `snapshots/` directory. Returns None if nothing
+    usable is cached yet — RunPod's own model-cache pre-staging and any
+    prior worker's download both land here, so this is what lets a warm
+    Network Volume (or RunPod's native cache) skip the network entirely."""
+    if "/" not in repo_id:
+        return None
+    org, name = repo_id.split("/", 1)
+    model_dir = Path(_download_model.hub_cache_dir(cache_dir)) / f"models--{org}--{name}"
+    snapshots_dir = model_dir / "snapshots"
+    if not snapshots_dir.is_dir():
+        return None
+
+    ref_main = model_dir / "refs" / "main"
+    if ref_main.is_file():
+        candidate = snapshots_dir / ref_main.read_text().strip()
+        if candidate.is_dir() and any(candidate.iterdir()):
+            return str(candidate)
+
+    non_empty = [p for p in sorted(snapshots_dir.iterdir()) if p.is_dir() and any(p.iterdir())]
+    return str(non_empty[-1]) if non_empty else None
+
+
+def _ensure_model_cached() -> None:
+    if os.environ.get("SKIP_MODEL_DOWNLOAD") == "1":
+        print("[BOOTSTRAP] SKIP_MODEL_DOWNLOAD=1, skipping model download", flush=True)
+        return
+
+    cache_dir = _download_model.resolve_cache_dir()
+    repo_id = os.environ.get("MODEL_REPO_ID", _download_model.DEFAULT_REPO_ID)
+    revision = os.environ.get("MODEL_REVISION", "main")
+
+    cached_snapshot = _resolve_cached_snapshot(cache_dir, repo_id)
+    if cached_snapshot is not None:
+        # RunPod's native model cache (endpoint "Model" field) or a prior
+        # worker's download already staged this — runtime download is a
+        # documented anti-pattern when a cache hit is available, so skip it
+        # entirely rather than re-verifying over the network.
+        print(f"[BOOTSTRAP] cached snapshot found at {cached_snapshot} — skipping network download", flush=True)
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        return
+
+    print(f"[BOOTSTRAP] no cached snapshot; downloading {repo_id}@{revision} to {cache_dir} ...", flush=True)
+    local_dir = _download_model.download(repo_id, revision, cache_dir)
+    _download_model.verify_snapshot(local_dir)
+    print("[BOOTSTRAP] model weights verified", flush=True)
+
+
+def _engine_healthy(timeout: float = 2.0) -> bool:
+    try:
+        return requests.get(HEALTH_ENDPOINT, timeout=timeout).status_code == 200
+    except requests.exceptions.RequestException:
+        return False
+
+
+def _ensure_engine_running() -> None:
+    """Launch `sgl-omni serve` as a child of this process and block until
+    it's healthy. If an engine is already answering /health (e.g. started
+    manually for local testing), skip launching a duplicate."""
+    global _engine_process
+
+    if _engine_healthy():
+        print("[BOOTSTRAP] engine already healthy (started externally), skipping launch", flush=True)
+        return
+
+    model_path = os.environ.get("MODEL_REPO_ID", _download_model.DEFAULT_REPO_ID)
+    tp_size = os.environ.get("TP_SIZE", "1")
+    print(
+        f"[BOOTSTRAP] launching sgl-omni serve --model-path {model_path} "
+        f"--port {ENGINE_PORT} --tp {tp_size} (log: {ENGINE_LOG_PATH})",
+        flush=True,
+    )
+
+    log_file = open(ENGINE_LOG_PATH, "wb")
+    _engine_process = subprocess.Popen(
+        [
+            "sgl-omni",
+            "serve",
+            "--model-path",
+            model_path,
+            "--host",
+            ENGINE_HOST,
+            "--port",
+            str(ENGINE_PORT),
+            "--tp",
+            tp_size,
+        ],
+        stdout=log_file,
+        stderr=subprocess.STDOUT,
+    )
+
+    print(
+        f"[BOOTSTRAP] waiting for {HEALTH_ENDPOINT} (timeout {ENGINE_READY_TIMEOUT_SECONDS}s)...",
+        flush=True,
+    )
+    deadline = time.monotonic() + ENGINE_READY_TIMEOUT_SECONDS
+    while time.monotonic() < deadline:
+        if _engine_process.poll() is not None:
+            raise RuntimeError(
+                f"sgl-omni engine exited early with code {_engine_process.returncode}; see {ENGINE_LOG_PATH}"
+            )
+        if _engine_healthy():
+            print("[BOOTSTRAP] engine healthy", flush=True)
+            return
+        time.sleep(ENGINE_POLL_INTERVAL_SECONDS)
+
+    raise RuntimeError(
+        f"engine did not become healthy within {ENGINE_READY_TIMEOUT_SECONDS}s; see {ENGINE_LOG_PATH}"
+    )
+
+
+def _bootstrap() -> None:
+    _print_diagnostics()
+    _run_env_check()
+    _ensure_model_cached()
+    _ensure_engine_running()
+    print("[BOOTSTRAP] worker is warm and ready for jobs", flush=True)
+
+
+# --------------------------------------------------------------------------
+# Per-job handling
+# --------------------------------------------------------------------------
 
 
 def _materialize_references(references: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
@@ -176,6 +386,14 @@ def handler(job: dict[str, Any]):
     finally:
         _cleanup_temp_paths(temp_paths)
 
+
+# Run the cold-start bootstrap at import time — RunPod's platform (setup
+# validation and the worker supervisor) needs to observe a live
+# runpod-importing process almost immediately, so this cannot wait behind
+# a separate shell entrypoint. Importing this module (e.g. from
+# tests/test_local.py) triggers the same bootstrap; _ensure_engine_running
+# skips launching a duplicate engine if one is already healthy.
+_bootstrap()
 
 if __name__ == "__main__":
     runpod.serverless.start({"handler": handler})

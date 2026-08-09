@@ -14,6 +14,10 @@
     { "key": "PYTHONUNBUFFERED", "value": "1" },
     { "key": "SKIP_MODEL_DOWNLOAD", "value": "0" }
   ],
+  "modelCaching": {
+    "note": "Set manually via the RunPod console (New Endpoint, or Manage -> Edit Endpoint on an existing one) -> Advanced settings -> Model. Verified 2026-08-09: this is a console-only setting, not yet part of the public REST v1 POST /templates or POST /endpoints schema, so it cannot be set from this file. RunPod pre-stages the model at /runpod-volume/huggingface-cache/hub/models--bosonai--higgs-tts-3-4b/... before the worker starts, and that wait is not billed. handler.py's bootstrap checks that exact path first and skips its own download entirely on a cache hit.",
+    "model": "bosonai/higgs-tts-3-4b"
+  },
   "gpuIds": "A100_SXM4_80GB,H100_SXM5_80GB,L40S",
   "gpuCount": 1,
   "minVram": 32,
