@@ -238,6 +238,7 @@ def _ensure_engine_running() -> None:
     deadline = time.monotonic() + ENGINE_READY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         if _engine_process.poll() is not None:
+            _dump_engine_log()
             raise RuntimeError(
                 f"sgl-omni engine exited early with code {_engine_process.returncode}; see {ENGINE_LOG_PATH}"
             )
@@ -246,9 +247,32 @@ def _ensure_engine_running() -> None:
             return
         time.sleep(ENGINE_POLL_INTERVAL_SECONDS)
 
+    _dump_engine_log()
     raise RuntimeError(
         f"engine did not become healthy within {ENGINE_READY_TIMEOUT_SECONDS}s; see {ENGINE_LOG_PATH}"
     )
+
+
+def _dump_engine_log(tail_bytes: int = 20_000) -> None:
+    """Print sgl-omni's own log to our stdout before the worker dies.
+
+    ENGINE_LOG_PATH lives on ephemeral container storage — it does not
+    survive the worker (it is not on `/runpod-volume`), and RunPod's log
+    pipeline only ever captures this process's stdout/stderr. Without this,
+    a crashed engine's actual error is silently lost the instant the
+    container exits, leaving only "exited early with code 1" behind.
+    """
+    print(f"[BOOTSTRAP] ---- begin {ENGINE_LOG_PATH} (last {tail_bytes} bytes) ----", flush=True)
+    try:
+        with open(ENGINE_LOG_PATH, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - tail_bytes))
+            content = f.read().decode(errors="replace")
+        print(content, flush=True)
+    except OSError as exc:
+        print(f"[BOOTSTRAP] could not read {ENGINE_LOG_PATH}: {exc}", flush=True)
+    print(f"[BOOTSTRAP] ---- end {ENGINE_LOG_PATH} ----", flush=True)
 
 
 def _bootstrap() -> None:

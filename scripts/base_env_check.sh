@@ -62,7 +62,11 @@ for bin in ffmpeg; do
     ok "${bin} present"
 done
 
-ldconfig -p 2>/dev/null | grep -q libsndfile.so || fail "libsndfile1 not found"
+# The libsndfile1 runtime package installs the versioned libsndfile.so.1
+# (the unversioned libsndfile.so symlink only ships in -dev); matching the
+# bare name here false-positived FAIL on a system where the package was
+# actually installed and present (confirmed live 2026-08-09).
+ldconfig -p 2>/dev/null | grep -q 'libsndfile\.so' || fail "libsndfile1 not found"
 ok "libsndfile1 present"
 
 # --- Env vars ---------------------------------------------------------------
