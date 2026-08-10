@@ -366,7 +366,8 @@ def _stream_audio_chunks(
             stream=True,
             timeout=(10, STREAM_CHUNK_TIMEOUT_SECONDS),
         ) as resp:
-            validate_engine_response(resp.status_code, resp.headers.get("content-type"))
+            if resp.status_code != 200:
+                validate_engine_response(resp.status_code, resp.headers.get("content-type"), resp.text)
             for raw_line in resp.iter_lines(decode_unicode=True):
                 if not raw_line:
                     continue
@@ -406,7 +407,7 @@ def _unary_audio_response(payload: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"engine connection error: {exc}"}
 
     try:
-        validate_engine_response(resp.status_code, resp.headers.get("content-type"))
+        validate_engine_response(resp.status_code, resp.headers.get("content-type"), resp.text)
     except ValidationError as exc:
         return {"error": str(exc)}
 

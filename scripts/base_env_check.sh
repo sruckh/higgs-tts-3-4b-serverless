@@ -62,12 +62,17 @@ for bin in ffmpeg; do
     ok "${bin} present"
 done
 
-# The libsndfile1 runtime package installs the versioned libsndfile.so.1
-# (the unversioned libsndfile.so symlink only ships in -dev); matching the
-# bare name here false-positived FAIL on a system where the package was
-# actually installed and present (confirmed live 2026-08-09).
-ldconfig -p 2>/dev/null | grep -q 'libsndfile\.so' || fail "libsndfile1 not found"
-ok "libsndfile1 present"
+# This check has false-positived on a system where the engine reached
+# healthy and actually served jobs (confirmed live 2026-08-10), meaning
+# whatever soundfile/sgl-omni actually load libsndfile from isn't what
+# `ldconfig -p` reports here (e.g. a bundled/conda copy outside the
+# system linker cache). Since fail() calls exit 1, treating this as fatal
+# was also silently skipping every check after it (the env-var checks and
+# the completion message below never ran). Downgrade to a non-fatal WARN
+# instead of chasing an unfalsifiable check further without shell access
+# to the actual container.
+ldconfig -p 2>/dev/null | grep -q 'libsndfile\.so' && ok "libsndfile1 present" \
+    || echo "WARN: libsndfile1 not found via ldconfig (may be bundled elsewhere; non-fatal)"
 
 # --- Env vars ---------------------------------------------------------------
 [[ "${PYTHONUNBUFFERED:-}" == "1" ]] || echo "WARN: PYTHONUNBUFFERED is not set to 1"

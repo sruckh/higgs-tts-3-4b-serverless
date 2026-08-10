@@ -147,13 +147,23 @@ def validate_job_input(raw_input: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def validate_engine_response(status_code: int, content_type: str | None) -> None:
+def validate_engine_response(status_code: int, content_type: str | None, body: str = "") -> None:
     """Sanity-check the local SGLang-Omni engine's HTTP response before
-    relaying it back to the RunPod caller."""
+    relaying it back to the RunPod caller.
+
+    `body` (the engine's own response text, truncated) is included verbatim
+    in the raised error rather than replaced with a guessed generic
+    message — a previous version hid the engine's actual validation error
+    behind a fixed string ("invalid inline control tags or malformed
+    payload") for every 400, which made a real payload-shape bug
+    undiagnosable from the job's returned error alone (confirmed live
+    2026-08-10).
+    """
     if status_code == 200:
         return
+    detail = f": {body[:2000]}" if body else ""
     if status_code == 400:
-        raise ValidationError("engine rejected request: invalid inline control tags or malformed payload")
+        raise ValidationError(f"engine rejected request (400){detail}")
     if status_code == 503:
-        raise ValidationError("engine unavailable: VRAM out-of-memory or not yet warmed up")
-    raise ValidationError(f"engine returned unexpected status {status_code} ({content_type})")
+        raise ValidationError(f"engine unavailable: VRAM out-of-memory or not yet warmed up{detail}")
+    raise ValidationError(f"engine returned unexpected status {status_code} ({content_type}){detail}")
