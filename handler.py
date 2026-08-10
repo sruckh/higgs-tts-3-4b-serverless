@@ -189,7 +189,6 @@ def _ensure_engine_running() -> None:
         return
 
     model_path = os.environ.get("MODEL_REPO_ID", _download_model.DEFAULT_REPO_ID)
-    tp_size = os.environ.get("TP_SIZE", "1")
     # SGLang's default --mem-fraction-static (~0.88 of total VRAM) reserves
     # far more than the ~9.3GB bf16 weights need, sized for high concurrency.
     # That default can overshoot on real "32GB" cards, which often report a
@@ -199,7 +198,7 @@ def _ensure_engine_running() -> None:
     mem_fraction_static = os.environ.get("MEM_FRACTION_STATIC", "0.75")
     print(
         f"[BOOTSTRAP] launching sgl-omni serve --model-path {model_path} "
-        f"--port {ENGINE_PORT} --tp {tp_size} --mem-fraction-static {mem_fraction_static} "
+        f"--port {ENGINE_PORT} --mem-fraction-static {mem_fraction_static} "
         f"(log: {ENGINE_LOG_PATH})",
         flush=True,
     )
@@ -216,10 +215,15 @@ def _ensure_engine_running() -> None:
                 ENGINE_HOST,
                 "--port",
                 str(ENGINE_PORT),
-                "--tp",
-                tp_size,
                 "--mem-fraction-static",
                 mem_fraction_static,
+                # No --tp: sgl-omni's HiggsTtsPipelineConfig (pydantic,
+                # extra_forbidden) rejects an unrecognized "tp" field
+                # outright — confirmed live 2026-08-10
+                # (ValidationError: Extra inputs are not permitted). The
+                # official Higgs TTS cookbook launch command never passes
+                # --tp either. TP_SIZE is intentionally unused until a
+                # correct flag/mechanism for this pipeline is confirmed.
             ],
             stdout=log_file,
             stderr=subprocess.STDOUT,

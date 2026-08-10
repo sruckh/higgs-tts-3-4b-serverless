@@ -19,7 +19,6 @@ fi
 MODEL_PATH="${MODEL_REPO_ID:-bosonai/higgs-tts-3-4b}"
 HOST="127.0.0.1"
 PORT="8000"
-TP_SIZE="${TP_SIZE:-1}"
 MEM_FRACTION_STATIC="${MEM_FRACTION_STATIC:-0.75}"
 HEALTH_URL="http://${HOST}:${PORT}/health"
 READY_TIMEOUT_SECONDS="${READY_TIMEOUT_SECONDS:-300}"
@@ -30,13 +29,17 @@ if [[ "${1:-}" == "--background" ]]; then
     RUN_BACKGROUND=1
 fi
 
-echo "start_engine: launching sgl-omni serve --model-path ${MODEL_PATH} --port ${PORT} --host ${HOST} --tp ${TP_SIZE} --mem-fraction-static ${MEM_FRACTION_STATIC}"
+echo "start_engine: launching sgl-omni serve --model-path ${MODEL_PATH} --port ${PORT} --host ${HOST} --mem-fraction-static ${MEM_FRACTION_STATIC}"
 
+# No --tp: sgl-omni's HiggsTtsPipelineConfig (pydantic, extra_forbidden)
+# rejects an unrecognized "tp" field outright — confirmed live 2026-08-10
+# (ValidationError: Extra inputs are not permitted). The official Higgs
+# TTS cookbook launch command never passes --tp either. TP_SIZE is
+# intentionally unused until a correct flag/mechanism is confirmed.
 launch_cmd=(sgl-omni serve
     --model-path "${MODEL_PATH}"
     --host "${HOST}"
     --port "${PORT}"
-    --tp "${TP_SIZE}"
     --mem-fraction-static "${MEM_FRACTION_STATIC}")
 
 if [[ "${RUN_BACKGROUND}" -eq 1 ]]; then

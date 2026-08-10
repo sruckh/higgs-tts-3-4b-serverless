@@ -147,7 +147,6 @@ Lower real-time factor is better (< 1.0 means faster than real-time playback).
 | `HF_HOME` | `/runpod-volume/huggingface-cache` | Weight cache root; the actual snapshot lives under `HF_HOME/hub/...`, matching both Hugging Face's own convention and RunPod's model-cache layout |
 | `BAKE_INTO_IMAGE` | `0` | Set to `1` to cache weights inside the image instead of a Network Volume |
 | `SKIP_MODEL_DOWNLOAD` | `0` | Set to `1` if weights are already present at `HF_HOME` |
-| `TP_SIZE` | `1` | Tensor-parallel degree passed to `sgl-omni serve` |
 | `ENGINE_READY_TIMEOUT_SECONDS` | `600` | How long `handler.py`'s bootstrap waits for `sgl-omni serve` to report healthy before failing the worker |
 | `RUNPOD_SKIP_GPU_CHECK` | `true` | Set on the image; skips a RunPod SDK fitness check that false-positive OOMs on this worker's VRAM footprint |
 | `RUNPOD_SKIP_AUTO_SYSTEM_CHECKS` | `true` | Set on the image; same reason as above |
