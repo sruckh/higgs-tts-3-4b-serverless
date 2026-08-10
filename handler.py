@@ -338,11 +338,19 @@ def _cleanup_temp_paths(paths: list[str]) -> None:
 
 
 def _build_engine_payload(job_input: dict[str, Any], engine_references: list[dict[str, Any]]) -> dict[str, Any]:
-    """Translate validated RunPod job input into an OpenAI speech request."""
+    """Translate validated RunPod job input into an OpenAI speech request.
+
+    The engine's `voice` field must be a string (default "default" per its
+    own docs) — sending `voice: null` when a caller only supplies
+    `references` (voice cloning, no explicit voice) is rejected outright
+    with "voice: Input should be a valid string" (confirmed live
+    2026-08-10). `job_input["voice"]` is `None` in exactly that case, so
+    fall back to "default" rather than passing the null through.
+    """
     return {
         "model": job_input["model"],
         "input": job_input["input"],
-        "voice": job_input.get("voice"),
+        "voice": job_input.get("voice") or "default",
         "references": engine_references,
         "response_format": job_input["response_format"],
         "speed": job_input["speed"],
