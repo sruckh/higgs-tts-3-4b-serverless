@@ -37,6 +37,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # module-scope bootstrap with a fast, immediately-repeating "exit code 1" —
 # confirmed as the actual cause of the 2026-08-09 crash loop. Do not set
 # this flag without keeping the pin in requirements.txt.
+#
+# FLASHINFER_DISABLE_VERSION_CHECK=1: installing sglang-omni pulls in
+# flashinfer==0.6.14 (a transitive dep of its pinned sglang==0.5.16), but
+# the base image's precompiled flashinfer-cubin kernel cache is at
+# 0.6.11.post1 — and as of 2026-08-10 no flashinfer-cubin release newer
+# than 0.6.13 exists on PyPI at all, so exact pinning isn't possible.
+# flashinfer's own startup version check treats this as fatal
+# (RuntimeError: flashinfer-cubin version ... does not match), even
+# though the cubin cache is a startup-time optimization, not a hard
+# requirement — flashinfer falls back to JIT-compiling kernels itself
+# when it's absent/mismatched. This env var (named directly in
+# flashinfer's own error message) disables that check.
 ENV PATH="/root/.local/bin:${PATH}" \
     CUDA_VERSION=12.4 \
     PYTHONUNBUFFERED=1 \
@@ -48,7 +60,8 @@ ENV PATH="/root/.local/bin:${PATH}" \
     TRANSFORMERS_CACHE=/runpod-volume/huggingface-cache \
     RUNPOD_SKIP_GPU_CHECK=true \
     RUNPOD_SKIP_AUTO_SYSTEM_CHECKS=true \
-    RUNPOD_INIT_TIMEOUT=1200
+    RUNPOD_INIT_TIMEOUT=1200 \
+    FLASHINFER_DISABLE_VERSION_CHECK=1
 
 RUN command -v uv >/dev/null 2>&1 || (curl -LsSf https://astral.sh/uv/install.sh | sh)
 
