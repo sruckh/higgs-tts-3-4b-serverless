@@ -25,9 +25,9 @@ MAX_INPUT_CHARS = 10_000
 # https://docs.runpod.io/serverless/workers/handler-functions#payload-limits
 # 2026-08-09). Base64 inflates decoded bytes by ~4/3, so a 6MB decoded total
 # becomes ~8MB encoded, leaving headroom under the stricter /run ceiling.
-# 3MB per clip (~62s of 24kHz/16-bit/mono WAV) covers realistic voice-cloning
+# 4MB per clip (~82s of 24kHz/16-bit/mono WAV) covers realistic voice-cloning
 # references; the combined cap is what actually protects the request size.
-MAX_REFERENCE_AUDIO_BYTES = 3 * 1024 * 1024
+MAX_REFERENCE_AUDIO_BYTES = 4 * 1024 * 1024
 MAX_TOTAL_REFERENCE_AUDIO_BYTES = 6 * 1024 * 1024
 MAX_REFERENCES = 4
 
